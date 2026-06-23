@@ -1,0 +1,422 @@
+from tkinter import *
+from tkinter.messagebox import showinfo, showerror
+from tkinter.ttk import Combobox
+from tkinter import messagebox
+from DB_manager import connect
+import re
+
+class MainApp:
+    def __init__(self):
+        self.window = Tk()
+        self.window.title("DimaUroki")
+        self.window.geometry("900x800")
+        self.window.resizable(width=False, height=False)
+
+        self.selected_user_id = None
+        self.card_widgets = {}
+
+        self.login_frame = Frame(self.window)
+
+        self.loginlbl = Label(self.login_frame, text="Окно авторизации", font=("Arial", 16))
+        self.loginlbl.pack(pady=(40, 20), anchor=CENTER)
+
+        self.loginlbl1 = Label(self.login_frame, text="Введите логин и пароль", font=("Arial", 12))
+        self.loginlbl1.pack(pady=10, anchor=CENTER)
+
+        self.loginEntry1 = Entry(self.login_frame)
+        self.loginEntry1.pack(pady=(20, 10), anchor=CENTER)
+
+        self.loginEntry2 = Entry(self.login_frame)
+        self.loginEntry2.pack(pady=(10, 10), anchor=CENTER)
+
+        self.loginbtn = Button(self.login_frame, text="Войти", command=self.check_login_and_password, font=("Arial", 12), width=15,
+                               height=1)
+        self.loginbtn.pack(pady=20, ipady=3, anchor=CENTER)
+
+        self.bdStatus = Label(self.login_frame, text="")
+        self.bdStatus.pack(pady=20, ipady=3, anchor=CENTER, side=BOTTOM)
+
+        self.AdminFrame = Frame(self.window)
+        self.UserFrame = Frame(self.window)
+
+        self.backBtn = Button(self.AdminFrame, text="Обратно", background="red", width=10, height=1, command=self.back_loginframe)
+        self.backBtn.pack(pady=20, ipady=3, side=TOP, anchor=W, padx=5)
+
+        self.BtnFrame = Frame(self.AdminFrame, bg="grey")
+        self.BtnFrame.pack(pady=20, ipady=3, side=TOP, anchor=W, padx=5, fill=X)
+
+        self.AddBtn = Button(self.BtnFrame, text="Добавить", bg="Green", fg="white", width=10, height=1, command=self.open_add_window)
+        self.AddBtn.pack(pady=20, ipady=3, side=LEFT, anchor="center", padx=5, ipadx=5)
+
+        self.DelBtn = Button(self.BtnFrame, text="Удалить", bg="Red", fg="white", width=10, height=1, command=self.del_user)
+        self.DelBtn.pack(pady=20, ipady=3, side=LEFT, anchor="center", padx=5, ipadx=5)
+
+        self.UpdBtn = Button(self.BtnFrame, text="Редактировать", bg="Blue", fg="white", width=10, height=1, command=self.open_update_window)
+        self.UpdBtn.pack(pady=20, ipady=3, side=LEFT, anchor="center", padx=5, ipadx=5)
+
+        self.SearchBtn = Button(self.BtnFrame, text="Поиск", bg="Yellow", fg="black", width=10, height=1, command=self.search_user)
+        self.SearchBtn.pack(pady=20, ipady=3, side=LEFT, anchor="center", padx=5, ipadx=5)
+
+        self.SearchEntry = Entry(self.BtnFrame, width=20)
+        self.SearchEntry.pack(pady=20, ipady=3, side=LEFT, anchor="center", padx=5, ipadx=5)
+
+        # --- НОВЫЙ КОД: Canvas с Scrollbar ---
+        self.cardContainerWrapper = Frame(self.AdminFrame)
+        self.cardContainerWrapper.pack(fill="both", expand=True, pady=20)
+
+        self.cardCanvas = Canvas(self.cardContainerWrapper, bg="white")
+        self.cardCanvas.pack(side=LEFT, fill=BOTH, expand=True)
+
+        self.scrollBar = Scrollbar(self.cardContainerWrapper, command=self.cardCanvas.yview, orient="vertical")
+        self.scrollBar.pack(side=RIGHT, fill=Y)
+
+        self.cardCanvas.configure(yscrollcommand=self.scrollBar.set)
+        self.cardCanvas.bind_all("<MouseWheel>", self.on_mousewheel)
+
+        self.cardsContainer = Frame(self.cardCanvas)
+        self.cardCanvas.create_window((0,0), window=self.cardsContainer, anchor="nw")
+
+        self.cardsContainer.bind("<Configure>", self.on_frame_configure)
+        self.cardCanvas.bind("<Configure>", self.on_canvas_configure)
+
+        self.back_loginframe()
+
+    def on_frame_configure(self, event):
+        self.cardCanvas.configure(scrollregion=self.cardCanvas.bbox("all"))
+
+    def on_canvas_configure(self,event):
+        self.cardCanvas.itemconfig("all", width = event.width)
+
+    def on_mousewheel(self, event):
+        self.cardCanvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+    def check_login_and_password(self):
+        login = self.loginEntry1.get().strip()
+        password = self.loginEntry2.get().strip()
+        if login == "" or password == "":
+            messagebox.showwarning('Не заполнены поля!',
+                                   'Вы не заполнили поле логина и/или пароля. Заполните поля для входа.')
+            return False
+        conn = connect()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute("select u_id, user_role from userprogramm WHERE login = %s AND password = %s", (login, password))
+            user = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            if user:
+                user_id, user_role = user
+                messagebox.showinfo("Авторизация успешна", f"Добро пожаловать {login}!")
+                if user_role == 2:
+                    self.open_admin()
+                else:
+                    self.open_user()
+            else:
+                messagebox.showerror("Ошибка авторизации", "Логин и/или пароль введены неверно!")
+                return False
+
+    def get_table_data(self):
+        for widget in self.cardsContainer.winfo_children():
+            widget.destroy()
+
+        self.card_widgets.clear()
+        self.selected_user_id = None
+        conn = connect()
+        cursor = conn.cursor()
+        cursor.execute("select id, user_name, phone, age from users")
+        rows = cursor.fetchall()
+
+        for row in rows:
+            user_id, name, phone, age = row
+
+            card = LabelFrame(self.cardsContainer,
+                              text=f"Пользователь ID: {user_id}",
+                              padx=10, pady=5,
+                              cursor="hand2")
+            card.pack(pady=5, fill=X, padx=100)
+
+            self.card_widgets[user_id] = card
+
+            lbl1 = Label(card, text=f"ФИО: {name}", cursor="hand2")
+            lbl1.pack(anchor=W)
+            lbl2 = Label(card, text=f"Телефон: {phone}", cursor="hand2")
+            lbl2.pack(anchor=W)
+            lbl3 = Label(card, text=f"Возраст: {age}", cursor="hand2")
+            lbl3.pack(anchor=W)
+
+            click_action = lambda event, u_id=user_id: self.select_card(u_id)
+
+            card.bind("<Button-1>", click_action)
+
+        cursor.close()
+        conn.close()
+
+    def select_card(self, user_id):
+        default_color = self.window.cget("bg")
+        for card in self.card_widgets.values():
+            card.configure(background=default_color)
+            for child in card.winfo_children():
+                child.configure(background=default_color)
+
+        self.selected_user_id = user_id
+
+        select_color = "#e2f0cb"
+        self.card_widgets[user_id].configure(background=select_color)
+        for child in self.card_widgets[user_id].winfo_children():
+            child.configure(background=select_color)
+
+    def open_admin(self):
+            self.login_frame.pack_forget()
+            self.AdminFrame.pack(fill=BOTH, expand=True)
+
+    def open_user(self):
+            self.login_frame.pack_forget()
+            self.UserFrame.pack(fill=BOTH, expand=True)
+
+    def back_loginframe(self):
+        self.AdminFrame.pack_forget()
+        self.login_frame.pack(fill=BOTH, expand=True)
+
+    def bd_check(self):
+        conn = connect()
+        if conn:
+            self.bdStatus.config(text="БД подключена", fg="green")
+            self.bdStatus.pack(side=BOTTOM, anchor=CENTER)
+        else:
+            self.bdStatus.config(text="БД не подключена", fg="red")
+            self.bdStatus.pack(side=BOTTOM)
+
+    def del_user(self):
+        if self.selected_user_id is None:
+            messagebox.showerror("Ошибка", "Вы не выбрали запись для удаления!")
+            return
+        is_confirmed = messagebox.askyesno("Удаление записи", "Вы уверены, что хотите удалить запись?")
+        if is_confirmed:
+            conn = connect()
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute("delete from users where id =%s",[self.selected_user_id])
+                conn.commit()
+                cursor.close()
+                conn.close()
+                messagebox.showinfo("Операция успешна", f"Запись №{self.selected_user_id} удалена")
+            self.get_table_data()
+
+    def open_add_window(self):
+        self.AddWindow = Toplevel(self.AdminFrame)
+        self.AddWindow.geometry("350x200")
+        self.AddWindow.title("Окно добавления")
+        self.AddWindow.resizable(width=False, height=False)
+        self.AddWindow.grab_set()
+
+        self.AddLbl = Label(self.AddWindow, text="Введите ФИО: ")
+        self.AddLbl.grid(column=0, row=0, columnspan=2, sticky=W, pady=5, padx=5)
+
+        self.AddNameEntry = Entry(self.AddWindow)
+        self.AddNameEntry.grid(column=3, row=0, sticky=E, pady=5, padx=5)
+
+        self.AddLbl2 = Label(self.AddWindow, text="Введите номер: ")
+        self.AddLbl2.grid(column=0, row=1, columnspan=2, sticky=W, pady=5, padx=5)
+
+        self.AddNumEntry = Entry(self.AddWindow)
+        self.AddNumEntry.grid(column=3, row=1, sticky=E, pady=5, padx=5)
+
+        self.AddLbl3 = Label(self.AddWindow, text="Введите возраст: ")
+        self.AddLbl3.grid(column=0, row=2, columnspan=2, sticky=W, pady=5, padx=5)
+
+        self.AddAgeEntry = Entry(self.AddWindow)
+        self.AddAgeEntry.grid(column=3, row=2, sticky=E, pady=5, padx=5)
+
+        self.AddLbl4 = Label(self.AddWindow, text="")
+        self.AddLbl4.grid(column=0, row=3, columnspan=2, sticky=W)
+
+        self.AddLbl5 = Label(self.AddWindow, text="")
+        self.AddLbl5.grid(column=0, row=4, columnspan=2, sticky=W)
+
+        self.AddLbl6 = Label(self.AddWindow, text="")
+        self.AddLbl6.grid(column=0, row=5, columnspan=2, sticky=W)
+
+        self.okBtn = Button(self.AddWindow, text="Добавить",  height=1, width=12, bg="green", fg="white", command=self.add_user)
+        self.okBtn.grid(column=2, row=7, columnspan=2, sticky=S)
+
+    def open_update_window(self):
+        if self.selected_user_id is None:
+            messagebox.showerror("Ошибка", "Выберите запись для редактирования.")
+            return
+        else:
+            conn = connect()
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute("select user_name, phone, age from users where id =%s",[self.selected_user_id])
+                result = cursor.fetchone()
+                user_name, phone, age = result
+                self.UpdateWindow = Toplevel(self.AdminFrame)
+                self.UpdateWindow.geometry("350x200")
+                self.UpdateWindow.title(f"Окно редактирования пользователя {self.selected_user_id}")
+                self.UpdateWindow.resizable(width=False, height=False)
+                self.UpdateWindow.grab_set()
+
+                self.UpdateLbl = Label(self.UpdateWindow, text="Введите ФИО: ")
+                self.UpdateLbl.grid(column=0, row=0, columnspan=2, sticky=W, pady=5, padx=5)
+
+                self.UpdateNameEntry = Entry(self.UpdateWindow)
+                self.UpdateNameEntry.grid(column=3, row=0, sticky=E, pady=5, padx=5)
+                self.UpdateNameEntry.insert(0, user_name)
+
+                self.UpdateLbl2 = Label(self.UpdateWindow, text="Введите номер: ")
+                self.UpdateLbl2.grid(column=0, row=1, columnspan=2, sticky=W, pady=5, padx=5)
+
+                self.UpdateNumEntry = Entry(self.UpdateWindow)
+                self.UpdateNumEntry.grid(column=3, row=1, sticky=E, pady=5, padx=5)
+                self.UpdateNumEntry.insert(0, phone)
+
+                self.UpdateLbl3 = Label(self.UpdateWindow, text="Введите возраст: ")
+                self.UpdateLbl3.grid(column=0, row=2, columnspan=2, sticky=W, pady=5, padx=5)
+
+                self.UpdateAgeEntry = Entry(self.UpdateWindow)
+                self.UpdateAgeEntry.grid(column=3, row=2, sticky=E, pady=5, padx=5)
+                self.UpdateAgeEntry.insert(0, age)
+
+                self.UpdateLbl4 = Label(self.UpdateWindow, text="")
+                self.UpdateLbl4.grid(column=0, row=3, columnspan=2, sticky=W)
+
+                self.UpdateLbl5 = Label(self.UpdateWindow, text="")
+                self.UpdateLbl5.grid(column=0, row=4, columnspan=2, sticky=W)
+
+                self.UpdateLbl6 = Label(self.UpdateWindow, text="")
+                self.UpdateLbl6.grid(column=0, row=5, columnspan=2, sticky=W)
+
+                self.okBtn = Button(self.UpdateWindow, text="Редактировать", height=1, width=12, bg="blue", fg="white",
+                                    command=self.update_user)
+                self.okBtn.grid(column=2, row=7, columnspan=2, sticky=S)
+
+    def update_user(self):
+            name = self.UpdateNameEntry.get().strip()
+            age = self.UpdateAgeEntry.get().strip()
+            phone = self.UpdateNumEntry.get().strip()
+            if name == "" or age == "" or phone == "":
+                messagebox.showerror("Ошибка", "Заполните все поля")
+                return
+            if not re.match(r"^[a-zA-Zа-яА-ЯёЁ\s\-]+$", name):
+                messagebox.showerror("Ошибка", f"Ввод {name} должен содержать только буквы, пробелы, точки и дефисы")
+                return
+
+            elif not age.isdigit():
+                messagebox.showerror("Ошибка", f"Ввод {age} должен содержать только цифры")
+                return
+
+            elif not phone.isdigit():
+                messagebox.showerror("Ошибка", f"Ввод {phone} должен содержать только цифры")
+                return
+
+            elif not int(age) > 0:
+                messagebox.showerror("Ошибка", "Возраст не может быть меньше или равным 0")
+                return
+
+            else:
+                conn = connect()
+                if conn:
+                    cursor = conn.cursor()
+                    cursor.execute("update users set user_name = %s, phone = %s, age = %s where id = %s", [name, phone, age, self.selected_user_id])
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    messagebox.showinfo("Успешно", f"Пользователь {self.selected_user_id} отредактирован.")
+                    self.UpdateWindow.destroy()
+                    self.get_table_data()
+                else:
+                    return
+
+    def add_user(self):
+        conn = connect()
+        if conn:
+            name = self.AddNameEntry.get().strip()
+            age = self.AddAgeEntry.get().strip()
+            phone = self.AddNumEntry.get().strip()
+            if name == "" or age == "" or phone == "":
+                messagebox.showerror("Ошибка", "Заполните все поля для добавления")
+                return
+
+            if not re.match(r"^[a-zA-Zа-яА-ЯёЁ\s\-]+$", name):
+                messagebox.showerror("Ошибка", f"Ввод {name} должен содержать только буквы, пробелы, точки и дефисы")
+                return
+
+            elif not age.isdigit():
+                 messagebox.showerror("Ошибка", f"Ввод {age} должен содержать только цифры")
+                 return
+
+            elif not phone.isdigit():
+                messagebox.showerror("Ошибка", f"Ввод {phone} должен содержать только цифры")
+                return
+
+            elif not int(age) > 0:
+                messagebox.showerror("Ошибка", "Возраст не может быть меньше или равным 0")
+                return
+
+            else:
+                cursor = conn.cursor()
+                cursor.execute("insert into users (user_name, age, phone) values (%s,%s,%s)",[name,age,phone])
+                conn.commit()
+                cursor.close()
+                conn.close()
+                messagebox.showinfo("Успешно", f"Пользователь {name} добавлен.")
+                self.AddWindow.destroy()
+                self.get_table_data()
+        else:
+            return
+
+    def search_user(self):
+        conn = connect()
+        for widget in self.cardsContainer.winfo_children():
+            widget.destroy()
+
+        self.card_widgets.clear()
+        self.selected_user_id = None
+        if conn:
+            cursor = conn.cursor()
+            search_query = self.SearchEntry.get().strip().lower()
+            if search_query == "":
+                self.get_table_data()
+                return
+
+            search_param = f"%{search_query}%"
+            sql = """
+            select id, user_name, phone, age from users where
+             LOWER(user_name) LIKE %s 
+              OR LOWER(age::text) LIKE %s 
+              OR LOWER(phone::text) LIKE %s 
+            """
+            cursor.execute(sql, (search_param, search_param, search_param))
+            rows = cursor.fetchall()
+            for row in rows:
+                user_id, name, phone, age = row
+
+                card = LabelFrame(self.cardsContainer,
+                                  text=f"Пользователь ID: {user_id}",
+                                  padx=10, pady=5,
+                                  cursor="hand2")
+                card.pack(pady=5, fill=X, padx=100)
+
+                self.card_widgets[user_id] = card
+
+                lbl1 = Label(card, text=f"ФИО: {name}", cursor="hand2")
+                lbl1.pack(anchor=W)
+                lbl2 = Label(card, text=f"Телефон: {phone}", cursor="hand2")
+                lbl2.pack(anchor=W)
+                lbl3 = Label(card, text=f"Возраст: {age}", cursor="hand2")
+                lbl3.pack(anchor=W)
+
+                click_action = lambda event, u_id=user_id: self.select_card(u_id)
+
+                card.bind("<Button-1>", click_action)
+            cursor.close()
+            conn.close()
+
+    def run(self):
+        self.bd_check()
+        self.get_table_data()
+        self.window.mainloop()
+
+if __name__ == "__main__":
+    app = MainApp()
+    app.run()
